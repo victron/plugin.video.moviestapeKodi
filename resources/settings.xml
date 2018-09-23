@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings>
+    <category label="network settings">
+        <!--<setting label="30002" type="enum" id="resources_language" lvalues="30007|30008|30009" default="0"/>-->
+        <setting label="fetch options" type="lsep"/>
+        <setting label="multiple threads" type="bool" id="multithreads" default="true"/>
+    </category>
+</settings>

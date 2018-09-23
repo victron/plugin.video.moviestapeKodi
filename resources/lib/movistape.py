@@ -5,28 +5,24 @@ import requests
 import re
 from bs4 import BeautifulSoup
 import xbmc, xbmcgui
+from threading import Thread
+import time
 # from addon import connect_timeout, read_timeout, max_retries, too_slow_connection, waited_too_long_between_bytes,\
 #     get_an_HTTPError, not_expected_output
 # get web page source
 # dialog = xbmcgui.Dialog()
+from resources.lib.common import log
+import xbmcaddon
+
+my_addon = xbmcaddon.Addon()
+multithreads = my_addon.getSetting('multithreads')  # returns the string 'true' or 'false'
+if multithreads == 'true':
+    multithreads = True
+else:
+    multithreads = False
+log('multithreads = ' + str(multithreads), xbmc.LOGDEBUG)
 
 url_root = 'http://moviestape.net'
-
-
-def log(msg, level=xbmc.LOGDEBUG):
-    """
-    "print" and xbmc.log does not support unicode. Always encode unicode strings to utf-8.
-    https://kodi.wiki/view/Add-on_unicode_paths
-    :param msg:
-    :param level:
-    :return:
-    """
-    plugin = "movistape"
-
-    if isinstance(msg, unicode):
-        msg = msg.encode('utf-8')
-
-    xbmc.log("[%s] %s" % (plugin, msg.__str__()), level)
 
 
 def GetHTML(url):
@@ -38,7 +34,7 @@ def GetHTML(url):
 #    connect_timeout = 2.0011
 #    read_timeout = 1.0
     try:
-        response = session.get(url= url, timeout=(connect_timeout, read_timeout))
+        response = session.get(url=url, timeout=(connect_timeout, read_timeout))
         #response = requests.get(url, timeout=(connect_timeout, read_timeout))
     except requests.exceptions.ConnectTimeout as e:
         xbmc.log(msg='[ex.ua.videos]' + 'Too slow connection', level=xbmc.LOGWARNING)
@@ -106,6 +102,7 @@ def get_categories():
   {'name': 'Фантастика', 'href': '/katalog_serialiv/fantastyk/'}]]
 
     """
+    t1 = time.time()
     response = requests.get(url_root)
     soup = BeautifulSoup(response.text, 'html.parser')
     menu = soup.body.find('div', class_='menu').ul
@@ -138,21 +135,59 @@ def get_categories():
         menu_list.append(catogory_list)
 
     # test href, replace on redirected and on full path
-    for submenu in menu_list:
-        for dic in submenu:
-            response = requests.get(url_root + dic['href'])
-            dic['href'] = response.url
+    # option1: single thread and  single connection
+    if not multithreads:
+        log('single connection in use', xbmc.LOGDEBUG)
+        s = requests.Session()
+        for submenu in menu_list:
+            for dic in submenu:
+                response = s.get(url_root + dic['href'])
+                dic['href'] = response.url
+        return menu_list
 
+    # # option-2 - multithreading
+    def get_link(index1, index2, session=None):
+        """
+        worker - replasing partual link into full and redirected link
+        :param index1: number of list1
+        :param index2: number of dict in list1
+        :param href: href from dict
+        :param session: request session (currently not used)
+        :return:
+        """
+        if session is not None:
+            _response = session.get(url_root + menu_list[index1][index2]['href'])
+        else:
+            _response = requests.get(url_root + menu_list[index1][index2]['href'])
+        menu_list[index1][index2]['href'] = _response.url
+
+    threads = []
+    for index1, list1 in enumerate(menu_list):
+        for index2, _ in enumerate(list1):
+            # We start one thread per url present.
+            process = Thread(target=get_link, args=[index1, index2, None])
+            process.start()
+            threads.append(process)
+
+    for process in threads:
+        process.join()
+
+    t2 = time.time()
+    log('get_categories t= ' + str(t2 - t1), xbmc.LOGDEBUG)
     return menu_list
 
 
-def get_movie_details(url):
+def get_movie_details(url, only_parse=False):
     """
     get details for movie, url to src file
     :param url: str
     :return: dict
     """
-    resp_movie = requests.get(url)
+    if not only_parse:
+        resp_movie = requests.get(url)
+    else:
+        resp_movie = url
+
     movie_soup = BeautifulSoup(resp_movie.text, 'html.parser')
     movie_meta = movie_soup.find('div', class_='f-content2')
     movie = {}
@@ -170,6 +205,7 @@ def get_movies_icons(soup):
     :param page: int
     :return: list
     """
+    t1 = time.time()
     movies = []
     for icon in soup.find_all('div', class_='bnewmovie'):
         movie = {}
@@ -180,8 +216,11 @@ def get_movies_icons(soup):
         remover = re.compile('[\xa0\xab]')
         movie['ycc'] = remover.sub('', movie['ycc'])
 
-        movie.update(get_movie_details(movie['detail_href']))
+        if not multithreads:
+            movie.update(get_movie_details(movie['detail_href']))
         movies.append(movie)
+    t2 = time.time()
+    log('get_movies_icons t= ' + str(t2 - t1), xbmc.LOGDEBUG)
     return movies
 
 
@@ -204,23 +243,27 @@ def get_movies_list(soup):
   'description': "Не вірячи в наявність чарівного зілля, яке, згідно з повір'ями, і допомагає галлам залишатися нескореними, Цезар вирішує піти на крайні заходи. Згадавши, про 12 подвигів Геракла він вирішує доручити виконати галлам 12 таких же неймовірно складних завдань...",
   'src': 'http://fs0.moviestape.net/show.php?name=cartoons/Les.douze.travaux.d.Asterix.mp4'}]
     """
+    t1 = time.time()
     movies = []
     for member in soup.find_all('img'):
         movie = {}
         movie['img'] = member['src']
-
         movie['title'] = member['title']
         try:
             movie['detail_href'] = member.parent['href']
         except KeyError:
             continue
 
-        movie.update(get_movie_details(movie['detail_href']))
         for key in ['img']:
             if not movie[key].startswith('http'):
                 movie[key] = url_root + movie[key]
 
+        if not multithreads:
+            movie.update(get_movie_details(movie['detail_href']))
+
         movies.append(movie)
+    t2 = time.time()
+    log('get_movies_list t= ' + str(t2 - t1), xbmc.LOGDEBUG)
     return movies
 
 
@@ -232,14 +275,43 @@ def movies(url):
     :param page:
     :return: list
     """
-
+    t1 = time.time()
     response = requests.get(url)
     soup = BeautifulSoup(response.text, 'html.parser')
     movies_list = soup.find('div', id='dle-content')
     if movies_list.find('div', class_='bnewmovie') is None:
-        log('class_=\'bnewmovie\' is None', xbmc.LOGERROR)
-        return get_movies_list(movies_list)
+        log('class_=\'bnewmovie\' is None', xbmc.LOGDEBUG)
+        movies = get_movies_list(movies_list)
     else:
-        log('[movistape]' + 'class_=\'bnewmovie\' is NOT None', xbmc.LOGERROR)
-        return get_movies_icons(movies_list)
+        log('[movistape]' + 'class_=\'bnewmovie\' is NOT None', xbmc.LOGDEBUG)
+        movies = get_movies_icons(movies_list)
+
+    if multithreads is False:
+        t2 = time.time()
+        log('movies (single thread) t= ' + str(t2 - t1), xbmc.LOGDEBUG)
+        return movies
+
+    # ---------------- multithread section ------------
+
+    def get_movie_details_multi(index):
+        movies[index]['resp'] = requests.get(movies[index]['detail_href'])
+        # movies[index].update(get_movie_details(movies[index]['detail_href']))
+
+    threads = []
+    for index, _ in enumerate(movies):
+        # We start one thread per url present.
+        process = Thread(target=get_movie_details_multi, args=[index])
+        process.start()
+        threads.append(process)
+
+    for process in threads:
+        process.join()
+
+    for movie in movies:
+        movie.update(get_movie_details(movie['resp'], True))
+
+    t2 = time.time()
+    log('movies (multiple thread) t= ' + str(t2 - t1), xbmc.LOGDEBUG)
+    return movies
+
 

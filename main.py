@@ -12,7 +12,7 @@ from urlparse import parse_qsl
 import xbmcgui, xbmc
 import xbmcplugin
 import resources.lib.movistape as movistape
-from resources.lib.movistape import log
+from resources.lib.common import log
 import requests
 import re
 
