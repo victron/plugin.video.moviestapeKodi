@@ -25,3 +25,8 @@ Movie from Stape :)
 Інсталяція
 
 ZIP архів можна взяти зі сторінки releases Загальну інструкцію з інсталяції плагінів можна знайти на сайті  [на сайті KODI](http://kodi.wiki/view/Add-on_manager#How_to_install_from_a_ZIP_file)
+
+## Tech Notes
+
+`%APPDATA%\Kodi\kodi.log` logs path  on win [details](https://kodi.wiki/view/Log_file/Advanced)
+

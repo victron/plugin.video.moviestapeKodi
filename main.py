@@ -169,8 +169,9 @@ def play_video(path):
     :param path: path to js script where final url located
     :return:
     """
+    log('path to video= ' + path, xbmc.LOGERROR)
     resp_movie_direct = requests.get(path)
-    reg_movie = re.compile('<source src=\"(.+?)\"')
+    reg_movie = re.compile('file:\"(.+?)\"')
 
     url = reg_movie.findall(resp_movie_direct.text)[0]
     play_item = xbmcgui.ListItem(path=url)
